@@ -4,6 +4,7 @@ import shutil
 from app.services.ocr_service import extract_text_from_file
 from app.services.nlp_service import extract_structured_data
 from app.services.classification_service import classify_document
+from app.services.verification_service import generate_verification_report # <-- NEW IMPORT
 
 router = APIRouter()
 UPLOAD_DIR = "uploaded_docs"
@@ -27,20 +28,24 @@ async def upload_document(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not save file: {str(e)}")
 
-    # 1. Get raw text
+    # 1. OCR Extraction
     raw_text = extract_text_from_file(file_path)
     
-    # 2. Classify document
+    # 2. Classification
     document_type = classify_document(raw_text)
     
-    # 3. Extract data dynamically based on the classification
+    # 3. Data Extraction
     structured_data = extract_structured_data(raw_text, document_type)
+    
+    # 4. Verification & Scoring (NEW STEP)
+    verification_report = generate_verification_report(document_type, structured_data)
 
     return {
         "filename": file.filename,
         "status": "success",
         "message": "Document processed successfully",
         "document_type": document_type,
+        "verification_report": verification_report, # <-- NEW: The AI decision layer
         "extracted_data": structured_data, 
         "raw_text": raw_text
     }

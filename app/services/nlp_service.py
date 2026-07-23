@@ -29,22 +29,29 @@ def extract_cnic_data(raw_text: str) -> dict:
 
 
 def extract_resume_data(raw_text: str) -> dict:
-    """Extracts contact information and basic entities from a Resume."""
+    """Extracts contact information, professional links, and basic entities from a Resume."""
     extracted_data = {
         "emails": [],
-        "phone_numbers": []
+        "phone_numbers": [],
+        "linkedin_urls": [],
+        "github_urls": []
     }
     
     # 1. Regex for Email Addresses
     email_pattern = r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'
-    emails = re.findall(email_pattern, raw_text)
-    # Use set() to remove any duplicate emails Tesseract might have read twice
-    extracted_data["emails"] = list(set(emails))
+    extracted_data["emails"] = list(set(re.findall(email_pattern, raw_text)))
     
-    # 2. Regex for Phone Numbers (Optimized for local +92 and 03XX formats, plus generic)
+    # 2. Regex for Phone Numbers 
     phone_pattern = r'(?:\+?92[\s\-]?|0)?3\d{2}[\s\-]?\d{7}'
-    phones = re.findall(phone_pattern, raw_text)
-    extracted_data["phone_numbers"] = list(set(phones))
+    extracted_data["phone_numbers"] = list(set(re.findall(phone_pattern, raw_text)))
+    
+    # 3. Regex for LinkedIn Profiles
+    linkedin_pattern = r'(?:https?:\/\/)?(?:www\.)?linkedin\.com\/in\/[a-zA-Z0-9_-]+'
+    extracted_data["linkedin_urls"] = list(set(re.findall(linkedin_pattern, raw_text)))
+
+    # 4. Regex for GitHub Profiles
+    github_pattern = r'(?:https?:\/\/)?(?:www\.)?github\.com\/[a-zA-Z0-9_-]+'
+    extracted_data["github_urls"] = list(set(re.findall(github_pattern, raw_text)))
     
     return extracted_data
 
