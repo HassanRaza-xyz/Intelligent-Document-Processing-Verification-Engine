@@ -3,7 +3,7 @@ import os
 import shutil
 from app.services.ocr_service import extract_text_from_file
 from app.services.nlp_service import extract_structured_data
-from app.services.classification_service import classify_document # <-- NEW IMPORT
+from app.services.classification_service import classify_document
 
 router = APIRouter()
 UPLOAD_DIR = "uploaded_docs"
@@ -27,21 +27,20 @@ async def upload_document(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not save file: {str(e)}")
 
-    # 1. Get raw text from OCR
+    # 1. Get raw text
     raw_text = extract_text_from_file(file_path)
     
-    # 2. Classify the document type
+    # 2. Classify document
     document_type = classify_document(raw_text)
     
-    # 3. Extract structured data (We can later make this conditional based on doc type)
-    structured_data = extract_structured_data(raw_text)
+    # 3. Extract data dynamically based on the classification
+    structured_data = extract_structured_data(raw_text, document_type)
 
-    # 4. Return the complete analysis
     return {
         "filename": file.filename,
         "status": "success",
         "message": "Document processed successfully",
-        "document_type": document_type, # <-- NEW: Shows the classification
+        "document_type": document_type,
         "extracted_data": structured_data, 
         "raw_text": raw_text
     }
