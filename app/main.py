@@ -1,6 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.endpoints import router as api_router  # Import the router
+from app.api.endpoints import router as api_router
+from app.database import engine, Base # <-- NEW IMPORT
+
+# -- NEW: Create database tables --
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="Intelligent Document Processing API",
@@ -8,7 +12,6 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,7 +20,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include the endpoints router with a versioned prefix
 app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/")

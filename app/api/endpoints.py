@@ -1,16 +1,24 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends # <-- Add Depends
 import os
 import shutil
+import json
+from sqlalchemy.orm import Session # <-- NEW IMPORT
+from app.database import get_db # <-- NEW IMPORT
+from app.models.document import DocumentRecord # <-- NEW IMPORT
+
 from app.services.ocr_service import extract_text_from_file
 from app.services.nlp_service import extract_structured_data
 from app.services.classification_service import classify_document
-from app.services.verification_service import generate_verification_report # <-- NEW IMPORT
+from app.services.verification_service import generate_verification_report
 
 router = APIRouter()
 UPLOAD_DIR = "uploaded_docs"
 
 @router.post("/upload/")
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(
+    file: UploadFile = File(...), 
+    db: Session = Depends(get_db) # <-- NEW: Inject DB Session
+):
     allowed_extensions = [".pdf", ".png", ".jpg", ".jpeg"]
     file_ext = os.path.splitext(file.filename)[1].lower()
     
@@ -28,24 +36,31 @@ async def upload_document(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not save file: {str(e)}")
 
-    # 1. OCR Extraction
+    # 1. Pipeline execution
     raw_text = extract_text_from_file(file_path)
-    
-    # 2. Classification
     document_type = classify_document(raw_text)
-    
-    # 3. Data Extraction
     structured_data = extract_structured_data(raw_text, document_type)
-    
-    # 4. Verification & Scoring (NEW STEP)
     verification_report = generate_verification_report(document_type, structured_data)
 
+    # 2. Save to Database (NEW STEP)
+    db_record = DocumentRecord(
+        filename=file.filename,
+        document_type=document_type,
+        completeness_score=verification_report["completeness_score"],
+        verification_status=verification_report["verification_status"],
+        extracted_data_summary=json.dumps(structured_data) # Convert dict to string for DB
+    )
+    db.add(db_record)
+    db.commit()
+    db.refresh(db_record)
+
     return {
+        "record_id": db_record.id, # Return the database ID
         "filename": file.filename,
         "status": "success",
-        "message": "Document processed successfully",
+        "message": "Document processed and saved to database successfully",
         "document_type": document_type,
-        "verification_report": verification_report, # <-- NEW: The AI decision layer
+        "verification_report": verification_report,
         "extracted_data": structured_data, 
         "raw_text": raw_text
     }
