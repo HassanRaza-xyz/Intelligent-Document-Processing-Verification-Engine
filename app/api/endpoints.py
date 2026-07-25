@@ -1,10 +1,10 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends # <-- Add Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 import os
 import shutil
 import json
-from sqlalchemy.orm import Session # <-- NEW IMPORT
-from app.database import get_db # <-- NEW IMPORT
-from app.models.document import DocumentRecord # <-- NEW IMPORT
+from sqlalchemy.orm import Session
+from app.database import get_db
+from app.models.document import DocumentRecord
 
 from app.services.ocr_service import extract_text_from_file
 from app.services.nlp_service import extract_structured_data
@@ -17,7 +17,7 @@ UPLOAD_DIR = "uploaded_docs"
 @router.post("/upload/")
 async def upload_document(
     file: UploadFile = File(...), 
-    db: Session = Depends(get_db) # <-- NEW: Inject DB Session
+    db: Session = Depends(get_db)
 ):
     allowed_extensions = [".pdf", ".png", ".jpg", ".jpeg"]
     file_ext = os.path.splitext(file.filename)[1].lower()
@@ -40,22 +40,22 @@ async def upload_document(
     raw_text = extract_text_from_file(file_path)
     document_type = classify_document(raw_text)
     structured_data = extract_structured_data(raw_text, document_type)
-    verification_report = generate_verification_report(document_type, structured_data)
+    verification_report = generate_verification_report(document_type, structured_data, file_path)
 
-    # 2. Save to Database (NEW STEP)
+    # 2. Save to Database
     db_record = DocumentRecord(
         filename=file.filename,
         document_type=document_type,
         completeness_score=verification_report["completeness_score"],
         verification_status=verification_report["verification_status"],
-        extracted_data_summary=json.dumps(structured_data) # Convert dict to string for DB
+        extracted_data_summary=json.dumps(structured_data) 
     )
     db.add(db_record)
     db.commit()
     db.refresh(db_record)
 
     return {
-        "record_id": db_record.id, # Return the database ID
+        "record_id": db_record.id, 
         "filename": file.filename,
         "status": "success",
         "message": "Document processed and saved to database successfully",
@@ -63,4 +63,22 @@ async def upload_document(
         "verification_report": verification_report,
         "extracted_data": structured_data, 
         "raw_text": raw_text
+    }
+
+# --- THIS IS THE NEW STEP 12 CODE ---
+@router.get("/documents/")
+async def get_all_documents(db: Session = Depends(get_db)):
+    """
+    Retrieves all processed document records from the database.
+    """
+    records = db.query(DocumentRecord).all()
+    
+    # Parse the stringified JSON back into a dictionary for a clean API response
+    for record in records:
+        if record.extracted_data_summary:
+            record.extracted_data_summary = json.loads(record.extracted_data_summary)
+            
+    return {
+        "total_processed": len(records),
+        "documents": records
     }

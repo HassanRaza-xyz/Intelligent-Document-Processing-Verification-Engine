@@ -1,12 +1,15 @@
 import os
+import platform 
 import pytesseract
 from PIL import Image
 import fitz  # PyMuPDF
 import cv2
 import numpy as np
 
-# Point pytesseract to the Tesseract executable on Windows
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# Dynamically set Tesseract path ONLY if running on Windows
+if platform.system() == "Windows":
+    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# If on Linux (Docker), pytesseract will automatically find it in the system PATH.
 
 def preprocess_image(image_path: str) -> Image.Image:
     """
@@ -21,8 +24,6 @@ def preprocess_image(image_path: str) -> Image.Image:
     # 2. Convert to grayscale
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    # Returning the grayscale image directly. 
-    # For CNICs, keeping the contrast natural often works better than forcing black/white.
     return Image.fromarray(gray)
 
 def extract_text_from_file(file_path: str) -> str:
@@ -35,9 +36,6 @@ def extract_text_from_file(file_path: str) -> str:
     try:
         if ext in ['.png', '.jpg', '.jpeg']:
             processed_image = preprocess_image(file_path)
-            
-            # config='--psm 6' tells Tesseract to assume a single uniform block of text.
-            # config='--psm 11' (sparse text) is also great for scattered ID fields.
             custom_config = r'--oem 3 --psm 11' 
             extracted_text = pytesseract.image_to_string(processed_image, config=custom_config)
         
