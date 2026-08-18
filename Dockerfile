@@ -4,7 +4,8 @@ FROM python:3.10-slim
 # Install system dependencies for Tesseract and OpenCV
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
-    libgl1-mesa-glx \
+    libgl1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory inside the container
