@@ -9,3 +9,4 @@ pillow
 python-multipart
 pydantic
 requests
+PyMuPDF
