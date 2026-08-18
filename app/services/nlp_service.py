@@ -1,68 +1,92 @@
-import re
+import os
+import json
+import google.generativeai as genai
+from dotenv import load_dotenv
 
-def extract_cnic_data(raw_text: str) -> dict:
-    """Extracts identity numbers and dates from a CNIC."""
-    extracted_data = {
-        "identity_number": None,
-        "date_of_birth": None,
-        "date_of_issue": None,
-        "date_of_expiry": None
-    }
+# Load environment variables from .env file
+load_dotenv()
 
-    cnic_pattern = r'\b\d{5}-?\d{7}-?\d{1}\b'
-    cnic_match = re.search(cnic_pattern, raw_text)
-    if cnic_match:
-        raw_id = cnic_match.group(0).replace("-", "")
-        if len(raw_id) == 13:
-            extracted_data["identity_number"] = f"{raw_id[:5]}-{raw_id[5:12]}-{raw_id[12:]}"
-
-    date_pattern = r'\b\d{2}[.,\-\s]+\d{2}[.,\-\s]+\d{4}\b'
-    raw_dates = re.findall(date_pattern, raw_text)
-    
-    clean_dates = [re.sub(r'[.,\-\s]+', '.', d) for d in raw_dates]
-    
-    if len(clean_dates) >= 1: extracted_data["date_of_birth"] = clean_dates[0]
-    if len(clean_dates) >= 2: extracted_data["date_of_issue"] = clean_dates[1]
-    if len(clean_dates) >= 3: extracted_data["date_of_expiry"] = clean_dates[2]
-
-    return extracted_data
-
-
-def extract_resume_data(raw_text: str) -> dict:
-    """Extracts contact information, professional links, and basic entities from a Resume."""
-    extracted_data = {
-        "emails": [],
-        "phone_numbers": [],
-        "linkedin_urls": [],
-        "github_urls": []
-    }
-    
-    # 1. Regex for Email Addresses
-    email_pattern = r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'
-    extracted_data["emails"] = list(set(re.findall(email_pattern, raw_text)))
-    
-    # 2. Regex for Phone Numbers 
-    phone_pattern = r'(?:\+?92[\s\-]?|0)?3\d{2}[\s\-]?\d{7}'
-    extracted_data["phone_numbers"] = list(set(re.findall(phone_pattern, raw_text)))
-    
-    # 3. Regex for LinkedIn Profiles
-    linkedin_pattern = r'(?:https?:\/\/)?(?:www\.)?linkedin\.com\/in\/[a-zA-Z0-9_-]+'
-    extracted_data["linkedin_urls"] = list(set(re.findall(linkedin_pattern, raw_text)))
-
-    # 4. Regex for GitHub Profiles
-    github_pattern = r'(?:https?:\/\/)?(?:www\.)?github\.com\/[a-zA-Z0-9_-]+'
-    extracted_data["github_urls"] = list(set(re.findall(github_pattern, raw_text)))
-    
-    return extracted_data
-
+# Configure the Gemini API
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 def extract_structured_data(raw_text: str, document_type: str) -> dict:
     """
-    Acts as a router to call the correct extraction logic based on document type.
+    Uses Gemini LLM to extract highly structured entities from messy OCR text.
+    Bypasses Regex limitations to accurately fetch Names, Skills, CGPA, etc.
     """
+    if not GEMINI_API_KEY:
+        return {"error": "GEMINI_API_KEY is missing. Please add it to your .env file."}
+
+    # Initialize the fast and cost-effective Flash model
+    model = genai.GenerativeModel('gemini-2.5-flash')
+
+    # 1. Define strict JSON schemas based on the document type
     if document_type == "CNIC":
-        return extract_cnic_data(raw_text)
+        schema = '''{
+            "name": "Applicant Full Name",
+            "father_name": "Father's Full Name",
+            "identity_number": "13-digit CNIC number (format: XXXXX-XXXXXXX-X)",
+            "date_of_birth": "DD.MM.YYYY",
+            "date_of_issue": "DD.MM.YYYY",
+            "date_of_expiry": "DD.MM.YYYY"
+        }'''
     elif document_type == "Resume":
-        return extract_resume_data(raw_text)
+        schema = '''{
+            "name": "Applicant Full Name",
+            "emails": ["List of email addresses"],
+            "phone_numbers": ["List of phone numbers"],
+            "linkedin_url": "LinkedIn profile URL or username",
+            "github_url": "GitHub profile URL or username",
+            "university": "Name of University",
+            "degree": "Degree name (e.g., BS Artificial Intelligence)",
+            "skills": ["List of technical and soft skills"],
+            "experience_months": "Total months of experience (integer, estimate if needed)"
+        }'''
+    elif document_type == "Transcript":
+        schema = '''{
+            "name": "Student Name",
+            "university": "University Name",
+            "degree": "Degree Name",
+            "cgpa": "Final CGPA (float number)",
+            "graduation_year": "Year of graduation (YYYY)"
+        }'''
     else:
-        return {"notice": "Structured extraction for this document type is not yet defined."}
+        return {"notice": "No LLM schema defined for this document type yet."}
+
+    # 2. Construct the strict prompt with guardrails
+    prompt = f"""
+    You are an expert AI data extraction engine for an enterprise document verification system.
+    I will provide you with messy, unstructured OCR text extracted from a {document_type}.
+    Your task is to extract the relevant information and return it EXACTLY in this JSON structure:
+    {schema}
+
+    Rules & Guardrails:
+    1. Return ONLY valid JSON. Do not include markdown formatting, backticks (```json), intro, or outro text.
+    2. If a specific field cannot be logically found in the text, return null for that field. Do not hallucinate or guess data.
+    3. Clean up standard OCR typos (e.g., if you see a date like "10,11. 1987", format it strictly as "10.11.1987").
+
+    Raw OCR Text:
+    {raw_text}
+    """
+
+    try:
+        # 3. Execute the LLM chain
+        response = model.generate_content(prompt)
+        response_text = response.text.strip()
+        
+        # Strip potential markdown formatting if the LLM ignores the guardrail
+        if response_text.startswith("```json"):
+            response_text = response_text[7:-3].strip()
+        elif response_text.startswith("```"):
+            response_text = response_text[3:-3].strip()
+            
+        # Parse and return the clean JSON dictionary
+        extracted_json = json.loads(response_text)
+        return extracted_json
+        
+    except json.JSONDecodeError:
+        return {"error": "LLM failed to return a valid JSON structure.", "raw_llm_output": response_text}
+    except Exception as e:
+        return {"error": f"LLM Processing Error: {str(e)}"}

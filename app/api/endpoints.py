@@ -19,6 +19,7 @@ async def upload_document(
     file: UploadFile = File(...), 
     db: Session = Depends(get_db)
 ):
+    # 1. File Type Validation
     allowed_extensions = [".pdf", ".png", ".jpg", ".jpeg"]
     file_ext = os.path.splitext(file.filename)[1].lower()
     
@@ -28,21 +29,34 @@ async def upload_document(
             detail="Invalid file type. Only PDF and images are supported."
         )
 
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    # --- NEW: Step 2 - Duplicate Upload Detection ---
+    # Database mein check karein ke kya yeh file pehle se maujood hai
+    existing_document = db.query(DocumentRecord).filter(DocumentRecord.filename == file.filename).first()
     
+    if existing_document:
+        raise HTTPException(
+            status_code=409, # HTTP 409 Conflict status for duplicates
+            detail=f"Duplicate Upload Detected: '{file.filename}' has already been processed and verified."
+        )
+    # ------------------------------------------------
+
+    # 2. Save the file locally
+    file_path = os.path.join(UPLOAD_DIR, file.filename)
     try:
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not save file: {str(e)}")
 
-    # 1. Pipeline execution
+    # 3. AI Pipeline Execution
     raw_text = extract_text_from_file(file_path)
     document_type = classify_document(raw_text)
     structured_data = extract_structured_data(raw_text, document_type)
+    
+    # Pass file_path for blur detection
     verification_report = generate_verification_report(document_type, structured_data, file_path)
 
-    # 2. Save to Database
+    # 4. Save New Record to Database
     db_record = DocumentRecord(
         filename=file.filename,
         document_type=document_type,
@@ -65,7 +79,6 @@ async def upload_document(
         "raw_text": raw_text
     }
 
-# --- THIS IS THE NEW STEP 12 CODE ---
 @router.get("/documents/")
 async def get_all_documents(db: Session = Depends(get_db)):
     """
@@ -73,7 +86,6 @@ async def get_all_documents(db: Session = Depends(get_db)):
     """
     records = db.query(DocumentRecord).all()
     
-    # Parse the stringified JSON back into a dictionary for a clean API response
     for record in records:
         if record.extracted_data_summary:
             record.extracted_data_summary = json.loads(record.extracted_data_summary)
@@ -81,4 +93,4 @@ async def get_all_documents(db: Session = Depends(get_db)):
     return {
         "total_processed": len(records),
         "documents": records
-    }
+    }   
